@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>VolumeBack</string>
+	<key>CFBundleDisplayName</key>
+	<string>VolumeBack</string>
+	<key>CFBundleExecutable</key>
+	<string>VolumeBack</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.volumeback.app</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>VolumeBack greift das System-Audio ab, um die Lautstärke von Geräten ohne eigene Lautstärkeregelung (z.B. HDMI-/DisplayPort-Monitore) regeln zu können.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string></string>
+</dict>
+</plist>
