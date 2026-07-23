@@ -17,6 +17,10 @@ final class VolumeEngine {
 
     static let virtualUID = "VolumeBack_Device_UID"
 
+    /// Custom Property des Treibers ('vbnm') zum Setzen des Anzeigenamens.
+    /// Direkte Sets auf kAudioObjectPropertyName blockiert coreaudiod.
+    private static let nameCustomSelector = AudioObjectPropertySelector(0x76626E6D) // 'vbnm'
+
     enum Mode: Equatable {
         /// Pipeline laeuft: virtuelles Geraet ist Standard, Audio geht ans Zielgeraet
         case active
@@ -68,7 +72,7 @@ final class VolumeEngine {
     func shutdown() {
         tearDownPipeline()
         if virtualID != kAudioObjectUnknown {
-            CA.set(virtualID, CA.address(kAudioObjectPropertyName), value: "VolumeBack" as CFString)
+            CA.set(virtualID, CA.address(Self.nameCustomSelector), value: "VolumeBack" as CFString)
         }
         if let current = CA.defaultOutputDevice(), current == virtualID,
            targetID != kAudioObjectUnknown {
@@ -142,11 +146,11 @@ final class VolumeEngine {
             applyGainFromVirtualDevice()
             // Anzeigename des virtuellen Geraets: "VolumeBack (<Zielgeraet>)",
             // damit im nativen Regler klar ist, was gesteuert wird.
-            // (Braucht Treiber >= Version 2; bei aelterem Treiber schlaegt der
+            // (Braucht Treiber >= Version 3; bei aelterem Treiber schlaegt der
             // Set einfach fehl und der Name bleibt "VolumeBack".)
             CA.set(
                 virtualID,
-                CA.address(kAudioObjectPropertyName),
+                CA.address(Self.nameCustomSelector),
                 value: "VolumeBack (\(targetName))" as CFString
             )
         } catch {
