@@ -104,7 +104,7 @@ final class VolumeEngine {
 
         resolveTarget()
         guard targetID != kAudioObjectUnknown else {
-            mode = .error("Kein Zielgerät gefunden")
+            mode = .error("No target device found")
             onStateChange?()
             return
         }
@@ -166,7 +166,7 @@ final class VolumeEngine {
     }
 
     private func buildTapPipeline() throws {
-        guard let targetUID else { throw EngineError(message: "Zielgerät hat keine UID") }
+        guard let targetUID else { throw EngineError(message: "Target device has no UID") }
 
         // 1. Tap auf das virtuelle Geraet: Audio aller Prozesse abgreifen,
         //    Original stummschalten (ohnehin ein Null-Sink). Uns selbst
@@ -188,7 +188,7 @@ final class VolumeEngine {
         var newTapID = AudioObjectID(kAudioObjectUnknown)
         var err = AudioHardwareCreateProcessTap(tapDescription, &newTapID)
         guard err == noErr, newTapID != kAudioObjectUnknown else {
-            throw EngineError(message: "Tap fehlgeschlagen (Fehler \(err)) – Berechtigung „Systemaudio-Aufnahme“ erteilt?")
+            throw EngineError(message: "Tap failed (error \(err)) – System Audio Recording permission granted?")
         }
         tapID = newTapID
 
@@ -214,7 +214,7 @@ final class VolumeEngine {
         var newAggregateID = AudioObjectID(kAudioObjectUnknown)
         err = AudioHardwareCreateAggregateDevice(description as CFDictionary, &newAggregateID)
         guard err == noErr, newAggregateID != kAudioObjectUnknown else {
-            throw EngineError(message: "Aggregatgerät fehlgeschlagen (Fehler \(err))")
+            throw EngineError(message: "Aggregate device failed (error \(err))")
         }
         aggregateID = newAggregateID
 
@@ -227,12 +227,12 @@ final class VolumeEngine {
             VolumeEngine.render(input: inInputData, output: outOutputData, gain: box.gain)
         }
         guard err == noErr, ioProcID != nil else {
-            throw EngineError(message: "IO-Proc fehlgeschlagen (Fehler \(err))")
+            throw EngineError(message: "IO proc failed (error \(err))")
         }
 
         err = AudioDeviceStart(aggregateID, ioProcID)
         guard err == noErr else {
-            throw EngineError(message: "Audio-IO-Start fehlgeschlagen (Fehler \(err))")
+            throw EngineError(message: "Audio IO start failed (error \(err))")
         }
         ioRunning = true
     }

@@ -2,10 +2,31 @@
 
 Brings the **native macOS volume control** back to devices that don't have
 one (HDMI/DisplayPort monitors, some DACs). The menu bar slider, Control
-Center, F11/F12 keys and the system volume HUD all work as usual —
+Center, volume keys (F11/F12) and the system volume HUD all work as usual —
 VolumeBack deliberately has no volume UI of its own.
 
-## Architecture
+## Download & Install
+
+1. Grab `VolumeBack.zip` from the
+   [latest release](https://github.com/AllUFknNbs/VolumeBack/releases/latest),
+   unzip it and move `VolumeBack.app` to `/Applications`.
+2. **First launch:** VolumeBack is open source and not notarized by Apple
+   (that requires a paid developer account), so macOS will block the first
+   start. Either:
+   - open it once, then go to **System Settings → Privacy & Security** and
+     click **"Open Anyway"**, or
+   - remove the quarantine flag in Terminal:
+     `xattr -d com.apple.quarantine /Applications/VolumeBack.app`
+3. VolumeBack detects that its audio driver is missing and offers to
+   install it (asks for your administrator password once; audio restarts
+   briefly).
+4. Allow **System Audio Recording** when macOS asks for it.
+5. Done. Select your monitor as output (or pick it in the VolumeBack menu)
+   and use volume keys / the menu bar slider as with any normal device.
+
+Requires macOS 15 or later. Universal binary (Apple Silicon + Intel).
+
+## How it works
 
 Two parts:
 
@@ -29,33 +50,26 @@ Behavior:
   selected, VolumeBack stays completely out of the way.
 - Volume is remembered per target device; on quit the app restores the real
   device as the default output.
+- The app compares the installed driver version with the one bundled in the
+  app and offers an update when they differ.
 
-## Building & Installing
+## Building from source
 
 ```sh
 ./build.sh                 # builds driver + app into ./build
 open build/VolumeBack.app  # launch the app
 ```
 
-Install the driver: menu bar icon → "Audio-Treiber installieren…"
-(or manually:)
+Requires Xcode Command Line Tools. The driver can also be installed
+manually:
 
 ```sh
 sudo cp -R build/VolumeBack.driver /Library/Audio/Plug-Ins/HAL/
 sudo killall coreaudiod
 ```
 
-Requires: macOS 15+, Xcode Command Line Tools.
-
-## Permissions
-
-- **System Audio Recording** (required, for the process tap): macOS asks on
-  first activation. Until granted, the app retries every few seconds.
-- Nothing else. No Accessibility permission needed — the volume keys work
-  natively through the virtual device.
-
-**Note:** the bundle is ad-hoc signed; after every rebuild macOS will ask
-for the permission again.
+**Note for development:** the bundle is ad-hoc signed; after every rebuild
+macOS will ask for the System Audio Recording permission again.
 
 ## Known limitations
 
@@ -64,7 +78,7 @@ for the permission again.
   the VolumeBack menu.
 - If the app dies hard (crash), the virtual device stays the default and
   audio is silent until the app runs again or you switch devices manually.
-  → Enable "Beim Anmelden starten" (launch at login).
+  → Enable "Launch at Login".
 - Slight additional latency (~10 ms) from the tap round trip.
 
 ## Uninstall
@@ -73,3 +87,9 @@ for the permission again.
 sudo rm -rf /Library/Audio/Plug-Ins/HAL/VolumeBack.driver
 sudo killall coreaudiod
 ```
+
+Then delete `VolumeBack.app`.
+
+## License
+
+[MIT](LICENSE)

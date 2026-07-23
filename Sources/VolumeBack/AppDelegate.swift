@@ -10,28 +10,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let menu = NSMenu()
 
     private let statusInfoItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let deviceMenuItem = NSMenuItem(title: "Ausgabegerät", action: nil, keyEquivalent: "")
+    private let deviceMenuItem = NSMenuItem(title: "Output Device", action: nil, keyEquivalent: "")
     private let deviceSubmenu = NSMenu()
     private let installDriverItem = NSMenuItem(
-        title: "Audio-Treiber installieren…",
+        title: "Install Audio Driver…",
         action: #selector(installDriver),
         keyEquivalent: ""
     )
-    private let loginItem = NSMenuItem(title: "Beim Anmelden starten", action: #selector(toggleLogin), keyEquivalent: "")
+    private let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
+
+    private var driverInstallPromptShown = false
+    private var driverVersionChecked = false
+
+    private var installedDriverURL: URL {
+        URL(fileURLWithPath: "/Library/Audio/Plug-Ins/HAL/VolumeBack.driver")
+    }
+    private var bundledDriverURL: URL? {
+        Bundle.main.resourceURL?.appendingPathComponent("VolumeBack.driver")
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildStatusItem()
         buildMenu()
-        engine.onStateChange = { [weak self] in self?.refreshUI() }
+        engine.onStateChange = { [weak self] in
+            self?.refreshUI()
+            self?.handleDriverState()
+        }
         engine.start()
         refreshUI()
+        handleDriverState()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         engine.shutdown()
     }
 
-    // MARK: - UI-Aufbau
+    // MARK: - UI setup
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -61,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(title: "VolumeBack beenden", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit VolumeBack", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 
@@ -73,11 +87,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshUI() {
         switch engine.mode {
         case .active:
-            statusInfoItem.title = "Regelt: \(engine.targetName)"
+            statusInfoItem.title = "Controlling: \(engine.targetName)"
         case .bypassed:
-            statusInfoItem.title = "Inaktiv – aktuelles Gerät regelt selbst"
+            statusInfoItem.title = "Inactive – current device has its own volume control"
         case .driverMissing:
-            statusInfoItem.title = "Treiber nicht installiert"
+            statusInfoItem.title = "Audio driver not installed"
         case .error(let message):
             statusInfoItem.title = message
         }
@@ -100,13 +114,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.representedObject = NSNumber(value: deviceID)
             item.state = (uid == engine.targetUID && engine.mode == .active) ? .on : .off
             if CA.hasSettableVolume(deviceID) {
-                item.toolTip = "Gerät hat eine eigene Lautstärkeregelung – VolumeBack ist hier nicht nötig, funktioniert aber."
+                item.toolTip = "This device has its own volume control – VolumeBack is not needed here."
             }
             deviceSubmenu.addItem(item)
         }
     }
 
-    // MARK: - Aktionen
+    // MARK: - Driver install flow
+
+    /// Zeigt beim ersten Start (oder nach einem Treiber-Update in der App)
+    /// proaktiv einen Installations-Dialog, statt die Funktion im Menue zu
+    /// verstecken.
+    private func handleDriverState() {
+        switch engine.mode {
+        case .driverMissing:
+            guard !driverInstallPromptShown else { return }
+            driverInstallPromptShown = true
+            promptDriverInstall(isUpdate: false)
+        case .active, .bypassed:
+            checkDriverVersionOnce()
+        case .error:
+            break
+        }
+    }
+
+    /// Vergleicht die Version des installierten Treibers mit der in der App
+    /// mitgelieferten und bietet bei Abweichung ein Update an.
+    private func checkDriverVersionOnce() {
+        guard !driverVersionChecked else { return }
+        driverVersionChecked = true
+        guard let bundledURL = bundledDriverURL,
+              let bundled = driverVersion(at: bundledURL),
+              let installed = driverVersion(at: installedDriverURL),
+              bundled != installed else { return }
+        promptDriverInstall(isUpdate: true)
+    }
+
+    private func driverVersion(at driverURL: URL) -> String? {
+        let plistURL = driverURL.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let dict = plist as? [String: Any] else { return nil }
+        return dict["CFBundleVersion"] as? String
+    }
+
+    private func promptDriverInstall(isUpdate: Bool) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        if isUpdate {
+            alert.messageText = "Update VolumeBack Audio Driver"
+            alert.informativeText = """
+            This version of VolumeBack includes an updated audio driver. \
+            macOS will ask for your administrator password, and audio will restart briefly.
+            """
+        } else {
+            alert.messageText = "Install VolumeBack Audio Driver"
+            alert.informativeText = """
+            VolumeBack needs a small virtual audio driver to provide the native macOS \
+            volume control for devices that don't have one.
+
+            macOS will ask for your administrator password, and audio will restart briefly.
+            """
+        }
+        alert.addButton(withTitle: isUpdate ? "Update Driver" : "Install Driver")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn {
+            installDriver()
+        }
+    }
+
+    // MARK: - Actions
 
     @objc private func selectDevice(_ sender: NSMenuItem) {
         guard let number = sender.representedObject as? NSNumber else { return }
@@ -120,9 +197,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func installDriver() {
-        guard let driverURL = Bundle.main.resourceURL?.appendingPathComponent("VolumeBack.driver"),
+        guard let driverURL = bundledDriverURL,
               FileManager.default.fileExists(atPath: driverURL.path) else {
-            NSLog("Treiber nicht im App-Bundle gefunden")
+            NSLog("Bundled driver not found in app resources")
             return
         }
         let script = """
@@ -134,7 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             var error: NSDictionary?
             NSAppleScript(source: script)?.executeAndReturnError(&error)
             if let error {
-                NSLog("Treiber-Installation fehlgeschlagen: \(error)")
+                NSLog("Driver installation failed: \(error)")
             }
             // coreaudiod-Neustart feuert die Geraete-Listener der Engine,
             // die Pipeline baut sich dann von selbst auf.
@@ -149,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 try SMAppService.mainApp.register()
             }
         } catch {
-            NSLog("Login-Item-Fehler: \(error)")
+            NSLog("Login item error: \(error)")
         }
         refreshUI()
     }

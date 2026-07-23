@@ -13,7 +13,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -21,7 +21,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>VolumeBack greift das System-Audio ab, um die Lautstärke von Geräten ohne eigene Lautstärkeregelung (z.B. HDMI-/DisplayPort-Monitore) regeln zu können.</string>
+	<string>VolumeBack captures system audio in order to control the volume of devices that have no volume control of their own (e.g. HDMI/DisplayPort monitors).</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 </dict>
