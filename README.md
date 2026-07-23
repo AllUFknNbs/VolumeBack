@@ -1,74 +1,73 @@
 # VolumeBack
 
-Bringt den **nativen macOS-Lautstärkeregler** für Geräte zurück, die keinen
-haben (HDMI-/DisplayPort-Monitore, manche DACs). Menüleisten-Slider,
-Control Center, F11/F12 und das System-HUD funktionieren ganz normal —
-VolumeBack hat bewusst keinerlei eigene Regler-UI.
+Brings the **native macOS volume control** back to devices that don't have
+one (HDMI/DisplayPort monitors, some DACs). The menu bar slider, Control
+Center, F11/F12 keys and the system volume HUD all work as usual —
+VolumeBack deliberately has no volume UI of its own.
 
-## Architektur
+## Architecture
 
-Zwei Teile:
+Two parts:
 
-1. **HAL-Treiber** (`Driver/VolumeBackDriver.c`): ein minimales virtuelles
-   Ausgabegerät („VolumeBack"), dessen einziger Zweck ein nativer
-   Lautstärke- und Mute-Regler ist. Es verwirft alles Audio (Null-Sink).
-   Kein Kext — ein normales AudioServerPlugIn in
-   `/Library/Audio/Plug-Ins/HAL/`.
+1. **HAL driver** (`Driver/VolumeBackDriver.c`): a minimal virtual output
+   device ("VolumeBack") whose only purpose is to host a native volume and
+   mute control. It discards all audio (null sink). No kext — just a regular
+   AudioServerPlugIn in `/Library/Audio/Plug-Ins/HAL/`.
 
-2. **Menüleisten-App** (`Sources/VolumeBack/`): setzt das virtuelle Gerät als
-   Standardausgang, greift das dorthin gespielte System-Audio per
-   **Core Audio Process Tap** (macOS 14.4+) ab und spielt es mit Gain
-   (= Wert des nativen Reglers) auf dem echten Zielgerät aus.
+2. **Menu bar app** (`Sources/VolumeBack/`): sets the virtual device as the
+   default output, captures the system audio played to it via a
+   **Core Audio process tap** (macOS 14.4+) and plays it back on the real
+   target device, applying the native control's value as gain.
 
-Für macOS sieht das virtuelle Gerät wie ein ganz normales Gerät mit
-Lautstärkeregler aus — deshalb funktioniert die komplette native Volume-UI.
+To macOS the virtual device looks like a perfectly normal device with a
+volume control — which is why the entire native volume UI just works.
 
-Verhalten:
-- Wird ein Gerät **ohne** eigene Regelung (Monitor) zum Standard, übernimmt
-  VolumeBack automatisch.
-- Wird ein Gerät **mit** eigener Regelung (AirPods, interne Lautsprecher)
-  gewählt, hält sich VolumeBack komplett raus.
-- Lautstärke wird pro Zielgerät gespeichert; beim Beenden stellt die App das
-  echte Gerät als Standard wieder her.
+Behavior:
+- When a device **without** its own volume control (a monitor) becomes the
+  default output, VolumeBack takes over automatically.
+- When a device **with** its own control (AirPods, built-in speakers) is
+  selected, VolumeBack stays completely out of the way.
+- Volume is remembered per target device; on quit the app restores the real
+  device as the default output.
 
-## Bauen & Installieren
+## Building & Installing
 
 ```sh
-./build.sh                 # baut Treiber + App nach ./build
-open build/VolumeBack.app  # App starten
+./build.sh                 # builds driver + app into ./build
+open build/VolumeBack.app  # launch the app
 ```
 
-Treiber installieren: Menüleisten-Symbol → „Audio-Treiber installieren…"
-(oder manuell:)
+Install the driver: menu bar icon → "Audio-Treiber installieren…"
+(or manually:)
 
 ```sh
 sudo cp -R build/VolumeBack.driver /Library/Audio/Plug-Ins/HAL/
 sudo killall coreaudiod
 ```
 
-Benötigt: macOS 15+, Xcode Command Line Tools.
+Requires: macOS 15+, Xcode Command Line Tools.
 
-## Berechtigungen
+## Permissions
 
-- **Systemaudio-Aufnahme** (Pflicht, für den Tap): macOS fragt beim ersten
-  Aktivieren. Bis zur Freigabe versucht die App es alle paar Sekunden erneut.
-- Sonst nichts. Keine Bedienungshilfen nötig — die Lautstärketasten laufen
-  nativ über das virtuelle Gerät.
+- **System Audio Recording** (required, for the process tap): macOS asks on
+  first activation. Until granted, the app retries every few seconds.
+- Nothing else. No Accessibility permission needed — the volume keys work
+  natively through the virtual device.
 
-**Hinweis:** Bundle ist ad-hoc-signiert; nach jedem Neubauen fragt macOS die
-Berechtigung erneut ab.
+**Note:** the bundle is ad-hoc signed; after every rebuild macOS will ask
+for the permission again.
 
-## Bekannte Grenzen
+## Known limitations
 
-- In den Soundeinstellungen ist „VolumeBack" als Ausgabegerät ausgewählt,
-  nicht der Monitor (systembedingt). Das echte Zielgerät wählt man im
-  VolumeBack-Menü.
-- Beendet man die App hart (Crash), bleibt das virtuelle Gerät Standard und
-  es ist still, bis die App wieder läuft oder man das Gerät manuell wechselt.
-  → „Beim Anmelden starten" aktivieren.
-- Minimal zusätzliche Latenz (~10 ms) durch den Tap-Umweg.
+- Sound settings show "VolumeBack" as the selected output device, not the
+  monitor (inherent to this approach). The real target device is chosen in
+  the VolumeBack menu.
+- If the app dies hard (crash), the virtual device stays the default and
+  audio is silent until the app runs again or you switch devices manually.
+  → Enable "Beim Anmelden starten" (launch at login).
+- Slight additional latency (~10 ms) from the tap round trip.
 
-## Deinstallation
+## Uninstall
 
 ```sh
 sudo rm -rf /Library/Audio/Plug-Ins/HAL/VolumeBack.driver
