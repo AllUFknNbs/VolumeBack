@@ -19,6 +19,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     )
     private let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
 
+    private let updateChecker = UpdateChecker()
+    private let checkUpdatesItem = NSMenuItem(
+        title: "Check for Updates…",
+        action: #selector(checkForUpdates),
+        keyEquivalent: ""
+    )
+    private let autoUpdateItem = NSMenuItem(
+        title: "Check for Updates Automatically",
+        action: #selector(toggleAutoUpdate),
+        keyEquivalent: ""
+    )
+    private let versionItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+
     private var driverInstallPromptShown = false
     private var driverVersionChecked = false
 
@@ -37,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.handleDriverState()
         }
         engine.start()
+        updateChecker.startIfEnabled()
         refreshUI()
         handleDriverState()
     }
@@ -70,10 +84,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        checkUpdatesItem.target = self
+        menu.addItem(checkUpdatesItem)
+
+        autoUpdateItem.target = self
+        menu.addItem(autoUpdateItem)
+
         loginItem.target = self
         menu.addItem(loginItem)
 
         menu.addItem(.separator())
+
+        versionItem.isEnabled = false
+        versionItem.title = "VolumeBack \(updateChecker.currentVersion)"
+        menu.addItem(versionItem)
 
         let quit = NSMenuItem(title: "Quit VolumeBack", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
@@ -99,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         installDriverItem.isHidden = engine.mode != .driverMissing
         deviceMenuItem.isHidden = engine.mode == .driverMissing
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        autoUpdateItem.state = updateChecker.autoCheckEnabled ? .on : .off
 
         let symbol = engine.mode == .active ? "speaker.wave.2.circle.fill" : "speaker.wave.2.circle"
         statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "VolumeBack")
@@ -216,6 +241,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // coreaudiod-Neustart feuert die Geraete-Listener der Engine,
             // die Pipeline baut sich dann von selbst auf.
         }
+    }
+
+    @objc private func checkForUpdates() {
+        updateChecker.check(userInitiated: true)
+    }
+
+    @objc private func toggleAutoUpdate() {
+        updateChecker.autoCheckEnabled.toggle()
+        refreshUI()
     }
 
     @objc private func toggleLogin() {

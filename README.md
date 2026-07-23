@@ -50,8 +50,13 @@ Behavior:
   selected, VolumeBack stays completely out of the way.
 - Volume is remembered per target device; on quit the app restores the real
   device as the default output.
+- The virtual device shows up as "VolumeBack (Your Device)" in the native
+  volume controls, so it's always clear what is being controlled.
 - The app compares the installed driver version with the one bundled in the
   app and offers an update when they differ.
+- Built-in updater: checks GitHub for new releases (automatically on launch
+  and daily — can be turned off in the menu, manual check always available)
+  and updates itself in place.
 
 ## Building from source
 

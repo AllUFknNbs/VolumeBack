@@ -67,6 +67,9 @@ final class VolumeEngine {
     /// das System-Audio ins virtuelle Nichts.
     func shutdown() {
         tearDownPipeline()
+        if virtualID != kAudioObjectUnknown {
+            CA.set(virtualID, CA.address(kAudioObjectPropertyName), value: "VolumeBack" as CFString)
+        }
         if let current = CA.defaultOutputDevice(), current == virtualID,
            targetID != kAudioObjectUnknown {
             CA.setDefaultOutput(targetID)
@@ -137,6 +140,15 @@ final class VolumeEngine {
             installControlListeners()
             pushPersistedVolumeToVirtualDevice()
             applyGainFromVirtualDevice()
+            // Anzeigename des virtuellen Geraets: "VolumeBack (<Zielgeraet>)",
+            // damit im nativen Regler klar ist, was gesteuert wird.
+            // (Braucht Treiber >= Version 2; bei aelterem Treiber schlaegt der
+            // Set einfach fehl und der Name bleibt "VolumeBack".)
+            CA.set(
+                virtualID,
+                CA.address(kAudioObjectPropertyName),
+                value: "VolumeBack (\(targetName))" as CFString
+            )
         } catch {
             tearDownPipeline()
             mode = .error(error.localizedDescription)

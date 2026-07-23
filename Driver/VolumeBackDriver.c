@@ -60,6 +60,10 @@ static Boolean                     gMute_Value = false;
 
 static Boolean                     gStream_IsActive = true;
 
+/* Anzeigename des Geraets — von der App setzbar, damit im nativen
+ * Lautstaerkeregler "VolumeBack (<echtes Geraet>)" steht. */
+static CFStringRef                 gDevice_Name_Value = NULL;
+
 // -------------------------------------------------------------------- Helfer
 
 static Float32 ScalarToDB(Float32 scalar)
@@ -162,6 +166,9 @@ static OSStatus VB_Initialize(AudioServerPlugInDriverRef inDriver, AudioServerPl
 {
     if (inDriver != gDriverRef) return kAudioHardwareBadObjectError;
     gPlugIn_Host = inHost;
+    if (gDevice_Name_Value == NULL) {
+        gDevice_Name_Value = CFStringCreateCopy(NULL, CFSTR(kDevice_Name));
+    }
     UpdateHostTicksPerFrame();
     return kAudioHardwareNoError;
 }
@@ -327,7 +334,8 @@ static OSStatus VB_IsPropertySettable(AudioServerPlugInDriverRef inDriver, Audio
     *outIsSettable = false;
     switch (inObjectID) {
         case kObjectID_Device:
-            if (inAddress->mSelector == kAudioDevicePropertyNominalSampleRate) *outIsSettable = true;
+            if (inAddress->mSelector == kAudioDevicePropertyNominalSampleRate ||
+                inAddress->mSelector == kAudioObjectPropertyName) *outIsSettable = true;
             break;
         case kObjectID_Stream_Output:
             if (inAddress->mSelector == kAudioStreamPropertyIsActive ||
@@ -543,7 +551,10 @@ static OSStatus VB_GetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObj
                     *outDataSize = sizeof(AudioObjectID); return kAudioHardwareNoError;
                 case kAudioObjectPropertyName:
                     if (inDataSize < sizeof(CFStringRef)) return kAudioHardwareBadPropertySizeError;
-                    *((CFStringRef*)outData) = CFSTR(kDevice_Name);
+                    pthread_mutex_lock(&gStateMutex);
+                    *((CFStringRef*)outData) = CFStringCreateCopy(
+                        NULL, gDevice_Name_Value != NULL ? gDevice_Name_Value : CFSTR(kDevice_Name));
+                    pthread_mutex_unlock(&gStateMutex);
                     *outDataSize = sizeof(CFStringRef); return kAudioHardwareNoError;
                 case kAudioObjectPropertyManufacturer:
                     if (inDataSize < sizeof(CFStringRef)) return kAudioHardwareBadPropertySizeError;
@@ -815,6 +826,28 @@ static OSStatus VB_SetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObj
 
     switch (inObjectID) {
         case kObjectID_Device:
+            if (inAddress->mSelector == kAudioObjectPropertyName) {
+                if (inDataSize != sizeof(CFStringRef)) return kAudioHardwareBadPropertySizeError;
+                CFStringRef newName = *((CFStringRef*)inData);
+                if (newName == NULL || CFGetTypeID(newName) != CFStringGetTypeID())
+                    return kAudioHardwareIllegalOperationError;
+                CFStringRef copy = CFStringCreateCopy(NULL, newName);
+                if (copy == NULL) return kAudioHardwareIllegalOperationError;
+
+                pthread_mutex_lock(&gStateMutex);
+                CFStringRef old = gDevice_Name_Value;
+                gDevice_Name_Value = copy;
+                pthread_mutex_unlock(&gStateMutex);
+                if (old != NULL) CFRelease(old);
+
+                if (gPlugIn_Host != NULL) {
+                    AudioObjectPropertyAddress change = {
+                        kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
+                    };
+                    gPlugIn_Host->PropertiesChanged(gPlugIn_Host, kObjectID_Device, 1, &change);
+                }
+                return kAudioHardwareNoError;
+            }
             if (inAddress->mSelector == kAudioDevicePropertyNominalSampleRate) {
                 if (inDataSize != sizeof(Float64)) return kAudioHardwareBadPropertySizeError;
                 Float64 newRate = *((const Float64*)inData);
