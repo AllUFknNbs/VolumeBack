@@ -880,6 +880,17 @@ static OSStatus VB_SetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObj
                 if (copy == NULL) return kAudioHardwareIllegalOperationError;
 
                 pthread_mutex_lock(&gStateMutex);
+                /* Unveraenderter Name: nichts melden. Jede PropertiesChanged-
+                 * Meldung laesst saemtliche HAL-Clients (Control Center,
+                 * AirPlayXPCHelper, ...) ihre Objektlisten neu abgleichen —
+                 * redundante Meldungen koennen coreaudiod in einen
+                 * Notification-Sturm treiben. */
+                if (gDevice_Name_Value != NULL &&
+                    CFStringCompare(gDevice_Name_Value, copy, 0) == kCFCompareEqualTo) {
+                    pthread_mutex_unlock(&gStateMutex);
+                    CFRelease(copy);
+                    return kAudioHardwareNoError;
+                }
                 CFStringRef old = gDevice_Name_Value;
                 gDevice_Name_Value = copy;
                 pthread_mutex_unlock(&gStateMutex);

@@ -72,7 +72,7 @@ final class VolumeEngine {
     func shutdown() {
         tearDownPipeline()
         if virtualID != kAudioObjectUnknown {
-            CA.set(virtualID, CA.address(Self.nameCustomSelector), value: "VolumeBack" as CFString)
+            setVirtualDeviceName("VolumeBack")
         }
         if let current = CA.defaultOutputDevice(), current == virtualID,
            targetID != kAudioObjectUnknown {
@@ -102,11 +102,21 @@ final class VolumeEngine {
     /// "VolumeBack". Der Treiber persistiert den Namen (>= v4), damit er
     /// auch direkt nach Boot/coreaudiod-Neustart stimmt.
     private func setVirtualDeviceName() {
+        setVirtualDeviceName("VolumeBack (\(targetName))")
+    }
+
+    private func setVirtualDeviceName(_ name: String) {
         guard virtualID != kAudioObjectUnknown else { return }
+        // Nur bei tatsaechlicher Aenderung setzen: jeder Set feuert im Treiber
+        // PropertiesChanged, worauf ALLE HAL-Clients ihre Objektlisten neu
+        // abgleichen. Redundante Sets koennen coreaudiod ueberlasten
+        // (Notification-Sturm -> Sound-Settings/Clients haengen).
+        let current = CA.getString(virtualID, CA.address(Self.nameCustomSelector))
+        guard current != name else { return }
         CA.set(
             virtualID,
             CA.address(Self.nameCustomSelector),
-            value: "VolumeBack (\(targetName))" as CFString
+            value: name as CFString
         )
     }
 
@@ -406,7 +416,14 @@ final class VolumeEngine {
     private func scheduleRebuild() {
         guard !rebuildScheduled else { return }
         rebuildScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        // Im Fehlerzustand deutlich langsamer: ein fehlgeschlagener Aufbau
+        // (Tap/Aggregat anlegen + wieder zerstoeren) feuert selbst die
+        // Geraete-Listener und wuerde sich sonst alle 0,35s selbst neu
+        // anstossen — die Dauerschleife ueberlastet coreaudiod, bis Audio
+        // systemweit haengt. scheduleRetry() (4s) uebernimmt das Neuprobieren.
+        let delay: TimeInterval
+        if case .error = mode { delay = 3.0 } else { delay = 0.35 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
             self.rebuildScheduled = false
             if self.isInSteadyState() { return }
