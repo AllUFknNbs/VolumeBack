@@ -58,6 +58,9 @@ final class VolumeEngine {
 
     private var rebuildScheduled = false
     private var retryScheduled = false
+    /// Name wurde geaendert, ohne dass ein Standardgeraet-Wechsel folgt —
+    /// der naechste erfolgreiche Rebuild muss die Route bouncen.
+    private var routeBounceNeeded = false
     private var controlListenersInstalledFor = AudioObjectID(kAudioObjectUnknown)
 
     // MARK: - Lifecycle
@@ -90,8 +93,12 @@ final class VolumeEngine {
         targetName = CA.deviceName(targetDeviceID)
         defaults.set(uid, forKey: "targetUID")
         if virtualID != kAudioObjectUnknown {
-            setVirtualDeviceName()
+            // War das virtuelle Geraet schon Standard (Monitor A -> B), sieht
+            // das Overlay keinen Routenwechsel — dann muss gebounced werden.
+            let wasDefault = CA.defaultOutputDevice() == virtualID
+            let nameChanged = setVirtualDeviceName()
             CA.setDefaultOutput(virtualID)
+            if wasDefault && nameChanged { routeBounceNeeded = true }
         }
         rebuild()
     }
@@ -101,23 +108,44 @@ final class VolumeEngine {
     /// aelterem Treiber schlaegt der Set einfach fehl und der Name bleibt
     /// "VolumeBack". Der Treiber persistiert den Namen (>= v4), damit er
     /// auch direkt nach Boot/coreaudiod-Neustart stimmt.
-    private func setVirtualDeviceName() {
+    @discardableResult
+    private func setVirtualDeviceName() -> Bool {
         setVirtualDeviceName("VolumeBack (\(targetName))")
     }
 
-    private func setVirtualDeviceName(_ name: String) {
-        guard virtualID != kAudioObjectUnknown else { return }
+    /// Liefert true, wenn der Name tatsaechlich geaendert wurde.
+    @discardableResult
+    private func setVirtualDeviceName(_ name: String) -> Bool {
+        guard virtualID != kAudioObjectUnknown else { return false }
         // Nur bei tatsaechlicher Aenderung setzen: jeder Set feuert im Treiber
         // PropertiesChanged, worauf ALLE HAL-Clients ihre Objektlisten neu
         // abgleichen. Redundante Sets koennen coreaudiod ueberlasten
         // (Notification-Sturm -> Sound-Settings/Clients haengen).
         let current = CA.getString(virtualID, CA.address(Self.nameCustomSelector))
-        guard current != name else { return }
-        CA.set(
+        guard current != name else { return false }
+        return CA.set(
             virtualID,
             CA.address(Self.nameCustomSelector),
             value: name as CFString
         )
+    }
+
+    /// Der Overlay-Slider (Control Center/Menueleiste) bezieht seinen Namen
+    /// aus der Routen-Infrastruktur (MediaRemote/audiomxd), und die liest
+    /// Namen nur bei einem Routenwechsel neu — nicht bei Umbenennung des
+    /// aktuellen Standardgeraets. Aendert sich der Name, waehrend das
+    /// virtuelle Geraet durchgehend Standard bleibt (Monitor A -> B), einmal
+    /// kurz uebers Zielgeraet bouncen, damit das Overlay den Namen einliest.
+    /// (Die Sound-Settings lesen dagegen direkt aus der HAL und brauchen das
+    /// nicht.)
+    private func bounceDefaultRouteForNameRefresh() {
+        guard targetID != kAudioObjectUnknown,
+              CA.defaultOutputDevice() == virtualID else { return }
+        CA.setDefaultOutput(targetID)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, self.virtualID != kAudioObjectUnknown else { return }
+            CA.setDefaultOutput(self.virtualID)
+        }
     }
 
     // MARK: - Aufbau
@@ -172,7 +200,13 @@ final class VolumeEngine {
             installControlListeners()
             pushPersistedVolumeToVirtualDevice()
             applyGainFromVirtualDevice()
-            setVirtualDeviceName()
+            // Rename ohne begleitenden Default-Wechsel (App-Start mit altem
+            // Namen, Zielgeraet weggefallen, Wechsel uebers Menue): Route
+            // bouncen, damit der Overlay-Slider den neuen Namen anzeigt.
+            if setVirtualDeviceName() || routeBounceNeeded {
+                bounceDefaultRouteForNameRefresh()
+            }
+            routeBounceNeeded = false
         } catch {
             tearDownPipeline()
             mode = .error(error.localizedDescription)

@@ -70,7 +70,19 @@ static Boolean                     gStream_IsActive = true;
  * seinen Namen selbst und meldet die Aenderung. */
 static CFStringRef                 gDevice_Name_Value = NULL;
 
+/* Ein Rename laeuft als offizielle Geraete-Rekonfiguration
+ * (RequestDeviceConfigurationChange -> PerformDeviceConfigurationChange):
+ * nur dabei lesen Clients wie das Control Center den kompletten
+ * Geraetezustand inkl. Name neu ein. Eine blosse PropertiesChanged-Meldung
+ * aktualisiert den Slider-Namen nicht, solange das Geraet Standard bleibt
+ * (z.B. Wechsel Monitor A -> Monitor B). Der neue Name wartet bis dahin
+ * in gDevice_PendingName. */
+static CFStringRef                 gDevice_PendingName = NULL;
+
 #define kCustomProperty_DeviceName 'vbnm'
+/* ChangeAction fuer den Rename — liegt weit ausserhalb jeder Samplerate,
+ * kollidiert also nicht mit dem Rate-Pfad in PerformDeviceConfigurationChange. */
+#define kChangeAction_SetName      0x76626E6D00000000ULL
 
 // -------------------------------------------------------------------- Helfer
 
@@ -227,6 +239,24 @@ static OSStatus VB_PerformDeviceConfigurationChange(AudioServerPlugInDriverRef i
 {
     (void)inChangeInfo;
     if (inDriver != gDriverRef || inDeviceObjectID != kObjectID_Device) return kAudioHardwareBadObjectError;
+
+    if (inChangeAction == kChangeAction_SetName) {
+        pthread_mutex_lock(&gStateMutex);
+        CFStringRef pending = gDevice_PendingName;
+        gDevice_PendingName = NULL;
+        CFStringRef old = NULL;
+        if (pending != NULL) {
+            old = gDevice_Name_Value;
+            gDevice_Name_Value = pending;
+        }
+        pthread_mutex_unlock(&gStateMutex);
+        if (old != NULL) CFRelease(old);
+        if (pending != NULL && gPlugIn_Host != NULL) {
+            gPlugIn_Host->WriteToStorage(gPlugIn_Host, CFSTR("deviceName"), pending);
+        }
+        return kAudioHardwareNoError;
+    }
+
     if (!RateIsSupported((Float64)inChangeAction)) return kAudioHardwareBadObjectError;
 
     pthread_mutex_lock(&gStateMutex);
@@ -239,7 +269,14 @@ static OSStatus VB_PerformDeviceConfigurationChange(AudioServerPlugInDriverRef i
 static OSStatus VB_AbortDeviceConfigurationChange(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID,
                                                   UInt64 inChangeAction, void* inChangeInfo)
 {
-    (void)inDriver; (void)inDeviceObjectID; (void)inChangeAction; (void)inChangeInfo;
+    (void)inDriver; (void)inDeviceObjectID; (void)inChangeInfo;
+    if (inChangeAction == kChangeAction_SetName) {
+        pthread_mutex_lock(&gStateMutex);
+        CFStringRef pending = gDevice_PendingName;
+        gDevice_PendingName = NULL;
+        pthread_mutex_unlock(&gStateMutex);
+        if (pending != NULL) CFRelease(pending);
+    }
     return kAudioHardwareNoError;
 }
 
@@ -880,29 +917,31 @@ static OSStatus VB_SetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObj
                 if (copy == NULL) return kAudioHardwareIllegalOperationError;
 
                 pthread_mutex_lock(&gStateMutex);
-                /* Unveraenderter Name: nichts melden. Jede PropertiesChanged-
-                 * Meldung laesst saemtliche HAL-Clients (Control Center,
-                 * AirPlayXPCHelper, ...) ihre Objektlisten neu abgleichen —
-                 * redundante Meldungen koennen coreaudiod in einen
-                 * Notification-Sturm treiben. */
-                if (gDevice_Name_Value != NULL &&
-                    CFStringCompare(gDevice_Name_Value, copy, 0) == kCFCompareEqualTo) {
+                /* Unveraenderter Name (aktiv oder bereits pending): nichts
+                 * anstossen. Jede Rekonfiguration/Notification laesst
+                 * saemtliche HAL-Clients (Control Center, AirPlayXPCHelper,
+                 * ...) ihre Objektlisten neu abgleichen — redundante
+                 * Meldungen koennen coreaudiod in einen Notification-Sturm
+                 * treiben. */
+                CFStringRef reference = gDevice_PendingName != NULL
+                    ? gDevice_PendingName : gDevice_Name_Value;
+                if (reference != NULL &&
+                    CFStringCompare(reference, copy, 0) == kCFCompareEqualTo) {
                     pthread_mutex_unlock(&gStateMutex);
                     CFRelease(copy);
                     return kAudioHardwareNoError;
                 }
-                CFStringRef old = gDevice_Name_Value;
-                gDevice_Name_Value = copy;
+                CFStringRef stalePending = gDevice_PendingName;
+                gDevice_PendingName = copy;
                 pthread_mutex_unlock(&gStateMutex);
-                if (old != NULL) CFRelease(old);
+                if (stalePending != NULL) CFRelease(stalePending);
 
+                /* Uebernommen wird der Name erst in
+                 * PerformDeviceConfigurationChange — siehe Kommentar an
+                 * gDevice_PendingName. */
                 if (gPlugIn_Host != NULL) {
-                    gPlugIn_Host->WriteToStorage(gPlugIn_Host, CFSTR("deviceName"), copy);
-                    AudioObjectPropertyAddress changes[2] = {
-                        { kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain },
-                        { kCustomProperty_DeviceName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain },
-                    };
-                    gPlugIn_Host->PropertiesChanged(gPlugIn_Host, kObjectID_Device, 2, changes);
+                    gPlugIn_Host->RequestDeviceConfigurationChange(
+                        gPlugIn_Host, kObjectID_Device, kChangeAction_SetName, NULL);
                 }
                 return kAudioHardwareNoError;
             }
