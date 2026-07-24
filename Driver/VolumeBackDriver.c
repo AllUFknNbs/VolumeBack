@@ -174,6 +174,20 @@ static OSStatus VB_Initialize(AudioServerPlugInDriverRef inDriver, AudioServerPl
 {
     if (inDriver != gDriverRef) return kAudioHardwareBadObjectError;
     gPlugIn_Host = inHost;
+
+    /* Zuletzt gesetzten Namen aus dem HAL-Storage laden, damit das Geraet
+     * schon beim Publish (Boot/coreaudiod-Neustart) richtig heisst — das
+     * Control-Center liest den Namen nur zu diesem Zeitpunkt zuverlaessig. */
+    if (gDevice_Name_Value == NULL && inHost != NULL) {
+        CFPropertyListRef stored = NULL;
+        if (inHost->CopyFromStorage(inHost, CFSTR("deviceName"), &stored) == kAudioHardwareNoError
+            && stored != NULL) {
+            if (CFGetTypeID(stored) == CFStringGetTypeID()) {
+                gDevice_Name_Value = CFStringCreateCopy(NULL, (CFStringRef)stored);
+            }
+            CFRelease(stored);
+        }
+    }
     if (gDevice_Name_Value == NULL) {
         gDevice_Name_Value = CFStringCreateCopy(NULL, CFSTR(kDevice_Name));
     }
@@ -872,6 +886,7 @@ static OSStatus VB_SetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObj
                 if (old != NULL) CFRelease(old);
 
                 if (gPlugIn_Host != NULL) {
+                    gPlugIn_Host->WriteToStorage(gPlugIn_Host, CFSTR("deviceName"), copy);
                     AudioObjectPropertyAddress changes[2] = {
                         { kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain },
                         { kCustomProperty_DeviceName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain },

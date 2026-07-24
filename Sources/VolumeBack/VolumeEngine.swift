@@ -90,9 +90,24 @@ final class VolumeEngine {
         targetName = CA.deviceName(targetDeviceID)
         defaults.set(uid, forKey: "targetUID")
         if virtualID != kAudioObjectUnknown {
+            setVirtualDeviceName()
             CA.setDefaultOutput(virtualID)
         }
         rebuild()
+    }
+
+    /// Anzeigename des virtuellen Geraets: "VolumeBack (<Zielgeraet>)".
+    /// Laeuft ueber die Custom Property 'vbnm' des Treibers (>= v3); bei
+    /// aelterem Treiber schlaegt der Set einfach fehl und der Name bleibt
+    /// "VolumeBack". Der Treiber persistiert den Namen (>= v4), damit er
+    /// auch direkt nach Boot/coreaudiod-Neustart stimmt.
+    private func setVirtualDeviceName() {
+        guard virtualID != kAudioObjectUnknown else { return }
+        CA.set(
+            virtualID,
+            CA.address(Self.nameCustomSelector),
+            value: "VolumeBack (\(targetName))" as CFString
+        )
     }
 
     // MARK: - Aufbau
@@ -129,6 +144,9 @@ final class VolumeEngine {
             targetUID = CA.deviceUID(currentDefault)
             targetName = CA.deviceName(currentDefault)
             if let uid = targetUID { defaults.set(uid, forKey: "targetUID") }
+            // Namen VOR dem Default-Wechsel setzen: das Control-Center liest
+            // den Geraetenamen nur beim Erscheinen/Wechsel zuverlaessig.
+            setVirtualDeviceName()
             CA.setDefaultOutput(virtualID)
         }
 
@@ -144,15 +162,7 @@ final class VolumeEngine {
             installControlListeners()
             pushPersistedVolumeToVirtualDevice()
             applyGainFromVirtualDevice()
-            // Anzeigename des virtuellen Geraets: "VolumeBack (<Zielgeraet>)",
-            // damit im nativen Regler klar ist, was gesteuert wird.
-            // (Braucht Treiber >= Version 3; bei aelterem Treiber schlaegt der
-            // Set einfach fehl und der Name bleibt "VolumeBack".)
-            CA.set(
-                virtualID,
-                CA.address(Self.nameCustomSelector),
-                value: "VolumeBack (\(targetName))" as CFString
-            )
+            setVirtualDeviceName()
         } catch {
             tearDownPipeline()
             mode = .error(error.localizedDescription)
